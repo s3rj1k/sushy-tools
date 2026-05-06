@@ -1085,6 +1085,12 @@ def parse_args():
                         type=str, choices=['full', 'vmedia', 'minimum'],
                         help='Feature set to provide. Can also be set'
                         'via config variable SUSHY_EMULATOR_FEATURE_SET.')
+    parser.add_argument('--storage-pool',
+                        type=str,
+                        help='The libvirt storage pool to use for volume '
+                             'creation. Can also be set via config variable '
+                             'SUSHY_EMULATOR_STORAGE_POOL. Default is '
+                             'default.')
     backend_group = parser.add_mutually_exclusive_group()
     backend_group.add_argument('--os-cloud',
                                type=str,
@@ -1155,6 +1161,9 @@ def main():
 
     if args.feature_set:
         app.config['SUSHY_EMULATOR_FEATURE_SET'] = args.feature_set
+
+    if args.storage_pool:
+        app.config['SUSHY_EMULATOR_STORAGE_POOL'] = args.storage_pool
 
     ssl_context = None
     ssl_certificate = app.config.get('SUSHY_EMULATOR_SSL_CERT')
