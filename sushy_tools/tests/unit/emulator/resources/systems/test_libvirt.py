@@ -936,6 +936,62 @@ class LibvirtDriverTestCase(base.BaseTestCase):
                             "ProcTurboMode": "Enabled"})
 
         conn_mock.defineXML.assert_called_once_with(mock.ANY)
+        xml = conn_mock.defineXML.call_args[0][0]
+        self.assertIn('pending_attributes', xml)
+
+    @mock.patch('libvirt.open', autospec=True)
+    def test_get_pending_bios_empty(self, libvirt_mock):
+        with open('sushy_tools/tests/unit/emulator/domain_bios.xml') as f:
+            domain_xml = f.read()
+
+        conn_mock = libvirt_mock.return_value
+        domain_mock = conn_mock.lookupByUUID.return_value
+        domain_mock.XMLDesc.return_value = domain_xml
+
+        pending = self.test_driver.get_pending_bios(self.uuid)
+        self.assertEqual({}, pending)
+
+    @mock.patch('libvirt.open', autospec=True)
+    def test_get_pending_bios_existing(self, libvirt_mock):
+        with open('sushy_tools/tests/unit/emulator/'
+                  'domain_bios_pending.xml') as f:
+            domain_xml = f.read()
+
+        conn_mock = libvirt_mock.return_value
+        domain_mock = conn_mock.lookupByUUID.return_value
+        domain_mock.XMLDesc.return_value = domain_xml
+
+        pending = self.test_driver.get_pending_bios(self.uuid)
+        self.assertEqual({"BootMode": "Uefi",
+                          "ProcTurboMode": "Enabled"}, pending)
+
+    @mock.patch('libvirt.open', autospec=True)
+    def test_apply_pending_bios(self, libvirt_mock):
+        with open('sushy_tools/tests/unit/emulator/'
+                  'domain_bios_pending.xml') as f:
+            domain_xml = f.read()
+
+        conn_mock = libvirt_mock.return_value
+        domain_mock = conn_mock.lookupByUUID.return_value
+        domain_mock.XMLDesc.return_value = domain_xml
+
+        with mock.patch.object(
+                self.test_driver, 'get_power_state', return_value='Off'):
+            self.test_driver.apply_pending_bios(self.uuid)
+
+        self.assertTrue(conn_mock.defineXML.called)
+
+    @mock.patch('libvirt.open', autospec=True)
+    def test_apply_pending_bios_empty(self, libvirt_mock):
+        with open('sushy_tools/tests/unit/emulator/domain_bios.xml') as f:
+            domain_xml = f.read()
+
+        conn_mock = libvirt_mock.return_value
+        domain_mock = conn_mock.lookupByUUID.return_value
+        domain_mock.XMLDesc.return_value = domain_xml
+
+        self.test_driver.apply_pending_bios(self.uuid)
+        conn_mock.defineXML.assert_not_called()
 
     @mock.patch('libvirt.open', autospec=True)
     def test_reset_bios(self, libvirt_mock):
@@ -950,7 +1006,7 @@ class LibvirtDriverTestCase(base.BaseTestCase):
                 self.test_driver, 'get_power_state', return_value='Off'):
             self.test_driver.reset_bios(self.uuid)
 
-        conn_mock.defineXML.assert_called_once_with(mock.ANY)
+        self.assertTrue(conn_mock.defineXML.called)
 
     def test__process_bios_attributes_get_default(self):
         with open('sushy_tools/tests/unit/emulator/domain.xml') as f:
@@ -1029,6 +1085,58 @@ class LibvirtDriverTestCase(base.BaseTestCase):
         self.assertIsNotNone(tree.find('metadata')
                              .find('sushy:bios', ns)
                              .find('sushy:versions', ns))
+
+    def test__process_pending_bios_attributes_read_empty(self):
+        with open('sushy_tools/tests/unit/emulator/domain_bios.xml') as f:
+            domain_xml = f.read()
+
+        result = self.test_driver._process_pending_bios_attributes(domain_xml)
+        self.assertFalse(result.attributes_written)
+        self.assertEqual({}, result.bios_attributes)
+
+    def test__process_pending_bios_attributes_read_existing(self):
+        with open('sushy_tools/tests/unit/emulator/'
+                  'domain_bios_pending.xml') as f:
+            domain_xml = f.read()
+
+        result = self.test_driver._process_pending_bios_attributes(domain_xml)
+        self.assertFalse(result.attributes_written)
+        self.assertEqual({"BootMode": "Uefi",
+                          "ProcTurboMode": "Enabled"},
+                         result.bios_attributes)
+
+    def test__process_pending_bios_attributes_write(self):
+        with open('sushy_tools/tests/unit/emulator/domain_bios.xml') as f:
+            domain_xml = f.read()
+
+        result = self.test_driver._process_pending_bios_attributes(
+            domain_xml,
+            {"BootMode": "Uefi", "ProcTurboMode": "Enabled"})
+        self.assertTrue(result.attributes_written)
+        self.assertEqual({"BootMode": "Uefi",
+                          "ProcTurboMode": "Enabled"},
+                         result.bios_attributes)
+
+        ns = {'sushy': 'http://openstack.org/xmlns/libvirt/sushy'}
+        pending = (result.tree.find('metadata')
+                   .find('sushy:bios', ns)
+                   .find('sushy:pending_attributes', ns))
+        self.assertIsNotNone(pending)
+
+    def test__process_pending_bios_attributes_clear(self):
+        with open('sushy_tools/tests/unit/emulator/'
+                  'domain_bios_pending.xml') as f:
+            domain_xml = f.read()
+
+        result = self.test_driver._process_pending_bios_attributes(
+            domain_xml, {})
+        self.assertTrue(result.attributes_written)
+
+        ns = {'sushy': 'http://openstack.org/xmlns/libvirt/sushy'}
+        pending = (result.tree.find('metadata')
+                   .find('sushy:bios', ns)
+                   .find('sushy:pending_attributes', ns))
+        self.assertIsNone(pending)
 
     @mock.patch('libvirt.open', autospec=True)
     def test__process_bios_error(self, libvirt_mock):

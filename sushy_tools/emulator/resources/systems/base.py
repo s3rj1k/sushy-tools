@@ -176,14 +176,33 @@ class AbstractSystemsDriver(metaclass=abc.ABCMeta):
         """
         raise error.NotSupportedError('Not implemented')
 
+    def get_pending_bios(self, identity):
+        """Get pending BIOS attributes for the system
+
+        :returns: key-value pairs of pending BIOS attributes, or empty dict
+            if nothing is pending
+        """
+        return {}
+
     def set_bios(self, identity, attributes):
         """Update BIOS attributes
+
+        Stores attributes as pending. They will be applied on the next
+        reboot or power on via apply_pending_bios().
 
         :param attributes: key-value pairs of attributes to update
 
         :raises: `FishyError` if BIOS attributes cannot be processed
         """
         raise error.NotSupportedError('Not implemented')
+
+    def apply_pending_bios(self, identity):
+        """Apply pending BIOS attributes
+
+        Called on reboot/power-on. Merges pending into current and clears
+        pending. No-op if nothing is pending.
+        """
+        pass
 
     def set_versions(self, identity, firmware_versions):
         """Update firmware versions

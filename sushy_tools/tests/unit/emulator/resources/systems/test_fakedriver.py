@@ -102,3 +102,48 @@ class FakeDriverTestCase(base.BaseTestCase):
         self.assertEqual([{'id': '00:5c:52:31:3a:9c',
                            'mac': '00:5c:52:31:3a:9c'}],
                          self.test_driver.get_nics(UUID))
+
+    def test_get_bios_default(self):
+        bios = self.test_driver.get_bios(UUID)
+        self.assertEqual(fakedriver.FakeDriver.DEFAULT_BIOS_ATTRIBUTES, bios)
+
+    def test_get_pending_bios_empty(self):
+        self.assertEqual({}, self.test_driver.get_pending_bios(UUID))
+
+    def test_set_bios_stores_pending(self):
+        self.test_driver.set_bios(UUID, {"BootMode": "Legacy"})
+        self.assertEqual({"BootMode": "Legacy"},
+                         self.test_driver.get_pending_bios(UUID))
+        self.assertEqual(fakedriver.FakeDriver.DEFAULT_BIOS_ATTRIBUTES,
+                         self.test_driver.get_bios(UUID))
+
+    def test_set_bios_accumulates_pending(self):
+        self.test_driver.set_bios(UUID, {"BootMode": "Legacy"})
+        self.test_driver.set_bios(UUID, {"ProcTurboMode": "Disabled"})
+        self.assertEqual({"BootMode": "Legacy",
+                          "ProcTurboMode": "Disabled"},
+                         self.test_driver.get_pending_bios(UUID))
+
+    def test_apply_pending_bios(self):
+        self.test_driver.set_bios(UUID, {"BootMode": "Legacy"})
+        self.test_driver.apply_pending_bios(UUID)
+
+        expected = dict(fakedriver.FakeDriver.DEFAULT_BIOS_ATTRIBUTES)
+        expected["BootMode"] = "Legacy"
+        self.assertEqual(expected, self.test_driver.get_bios(UUID))
+        self.assertEqual({}, self.test_driver.get_pending_bios(UUID))
+
+    def test_apply_pending_bios_empty(self):
+        self.test_driver.apply_pending_bios(UUID)
+        self.assertEqual(fakedriver.FakeDriver.DEFAULT_BIOS_ATTRIBUTES,
+                         self.test_driver.get_bios(UUID))
+
+    def test_reset_bios(self):
+        self.test_driver.set_bios(UUID, {"BootMode": "Legacy"})
+        self.test_driver.apply_pending_bios(UUID)
+        self.test_driver.set_bios(UUID, {"QuietBoot": "false"})
+
+        self.test_driver.reset_bios(UUID)
+        self.assertEqual(fakedriver.FakeDriver.DEFAULT_BIOS_ATTRIBUTES,
+                         self.test_driver.get_bios(UUID))
+        self.assertEqual({}, self.test_driver.get_pending_bios(UUID))

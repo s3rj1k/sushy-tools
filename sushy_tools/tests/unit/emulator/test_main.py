@@ -524,9 +524,11 @@ class SystemsTestCase(EmulatorTestCase):
     @patch_resource('systems')
     def test_system_reset_action_ok(self, systems_mock):
         set_power_state = systems_mock.return_value.set_power_state
+        apply_pending = systems_mock.return_value.apply_pending_bios
         for reset_type in ('On', 'ForceOn', 'GracefulRestart', 'ForceRestart',
                            'Nmi'):
             set_power_state.reset_mock()
+            apply_pending.reset_mock()
             data = {'ResetType': reset_type}
             response = self.app.post(
                 '/redfish/v1/Systems/xxxx-yyyy-zzzz/Actions/'
@@ -535,6 +537,45 @@ class SystemsTestCase(EmulatorTestCase):
             self.assertEqual(204, response.status_code)
             set_power_state.assert_called_once_with('xxxx-yyyy-zzzz',
                                                     reset_type)
+
+    @patch_resource('systems')
+    def test_system_reset_applies_pending_bios(self, systems_mock):
+        apply_pending = systems_mock.return_value.apply_pending_bios
+        for reset_type in ('On', 'ForceOn', 'GracefulRestart', 'ForceRestart'):
+            apply_pending.reset_mock()
+            data = {'ResetType': reset_type}
+            response = self.app.post(
+                '/redfish/v1/Systems/xxxx-yyyy-zzzz/Actions/'
+                'ComputerSystem.Reset',
+                json=data)
+            self.assertEqual(204, response.status_code)
+            apply_pending.assert_called_once_with('xxxx-yyyy-zzzz')
+
+    @patch_resource('systems')
+    def test_system_reset_no_pending_bios_on_shutdown(self, systems_mock):
+        apply_pending = systems_mock.return_value.apply_pending_bios
+        for reset_type in ('ForceOff', 'GracefulShutdown'):
+            apply_pending.reset_mock()
+            data = {'ResetType': reset_type}
+            response = self.app.post(
+                '/redfish/v1/Systems/xxxx-yyyy-zzzz/Actions/'
+                'ComputerSystem.Reset',
+                json=data)
+            self.assertEqual(204, response.status_code)
+            apply_pending.assert_not_called()
+
+    @patch_resource('systems')
+    def test_system_reset_pending_bios_not_supported(self, systems_mock):
+        systems_mock.return_value.apply_pending_bios.side_effect = (
+            error.NotSupportedError)
+        data = {'ResetType': 'On'}
+        response = self.app.post(
+            '/redfish/v1/Systems/xxxx-yyyy-zzzz/Actions/'
+            'ComputerSystem.Reset',
+            json=data)
+        self.assertEqual(204, response.status_code)
+        systems_mock.return_value.set_power_state.assert_called_once_with(
+            'xxxx-yyyy-zzzz', 'On')
 
     @patch_resource('systems')
     def test_system_reset_action_fail(self, systems_mock):
@@ -600,10 +641,9 @@ class BiosTestCase(EmulatorTestCase):
                           "attribute 2": "value 2"},
                          response.json['Attributes'])
 
-    def test_get_bios_existing(self, systems_mock):
-        systems_mock.return_value.get_bios.return_value = {
+    def test_get_bios_settings_pending(self, systems_mock):
+        systems_mock.return_value.get_pending_bios.return_value = {
             "attribute 1": "value 1",
-            "attribute 2": "value 2"
         }
         response = self.app.get(
             '/redfish/v1/Systems/' + self.uuid + '/BIOS/Settings')
@@ -611,9 +651,17 @@ class BiosTestCase(EmulatorTestCase):
         self.assertEqual(200, response.status_code)
         self.assertEqual('Settings', response.json['Id'])
         self.assertEqual(
-            {"attribute 1": "value 1",
-             "attribute 2": "value 2"},
+            {"attribute 1": "value 1"},
             response.json['Attributes'])
+
+    def test_get_bios_settings_empty(self, systems_mock):
+        systems_mock.return_value.get_pending_bios.return_value = {}
+        response = self.app.get(
+            '/redfish/v1/Systems/' + self.uuid + '/BIOS/Settings')
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual('Settings', response.json['Id'])
+        self.assertEqual({}, response.json['Attributes'])
 
     def test_bios_settings_patch(self, systems_mock):
         data = {'Attributes': {'key': 'value'}}

@@ -33,6 +33,8 @@ except ImportError:
 
 is_loaded = bool(libvirt)
 
+SUSHY_NAMESPACE = 'http://openstack.org/xmlns/libvirt/sushy'
+
 BiosProcessResult = namedtuple('BiosProcessResult',
                                ['tree',
                                 'attributes_written',
@@ -855,6 +857,27 @@ class LibvirtDriver(AbstractSystemsDriver):
 
         return total_cpus or None
 
+    @staticmethod
+    def _find_bios_element(domain_xml):
+        """Parse domain XML and return the sushy:bios element.
+
+        Creates metadata and sushy:bios elements if they don't exist.
+
+        :returns: tuple of (tree, bios_element, namespace_dict)
+        """
+        ET.register_namespace('sushy', SUSHY_NAMESPACE)
+        ns = {'sushy': SUSHY_NAMESPACE}
+
+        tree = ET.fromstring(domain_xml)
+        metadata = tree.find('metadata')
+        if metadata is None:
+            metadata = ET.SubElement(tree, 'metadata')
+        bios = metadata.find('sushy:bios', ns)
+        if bios is None:
+            bios = ET.SubElement(
+                metadata, '{%s}bios' % SUSHY_NAMESPACE)
+        return tree, bios, ns
+
     def _process_bios_attributes(self,
                                  domain_xml,
                                  bios_attributes=DEFAULT_BIOS_ATTRIBUTES,
@@ -892,40 +915,64 @@ class LibvirtDriver(AbstractSystemsDriver):
             attributes_written: if changes were made to XML,
             bios_attributes: dict of BIOS attributes
         """
-        namespace = 'http://openstack.org/xmlns/libvirt/sushy'
-        ET.register_namespace('sushy', namespace)
-        ns = {'sushy': namespace}
-
-        tree = ET.fromstring(domain_xml)
-        metadata = tree.find('metadata')
-
-        if metadata is None:
-            metadata = ET.SubElement(tree, 'metadata')
-        bios = metadata.find('sushy:bios', ns)
+        tree, bios, ns = self._find_bios_element(domain_xml)
 
         attributes_written = False
-        if bios is None:
-            bios = ET.SubElement(metadata, '{%s}bios' % (namespace))
 
         attributes = bios.find('sushy:attributes', ns)
         if attributes is not None and update_existing_attributes:
             bios.remove(attributes)
             attributes = None
         if attributes is None:
-            attributes = ET.SubElement(bios, '{%s}attributes' % (namespace))
+            attributes = ET.SubElement(
+                bios, '{%s}attributes' % SUSHY_NAMESPACE)
             for key, value in sorted(bios_attributes.items()):
                 if not isinstance(value, str):
                     value = str(value)
                 ET.SubElement(attributes,
-                              '{%s}attribute' % (namespace),
+                              '{%s}attribute' % SUSHY_NAMESPACE,
                               name=key,
                               value=value)
             attributes_written = True
 
         bios_attributes = {atr.attrib['name']: atr.attrib['value']
-                           for atr in tree.find('.//sushy:attributes', ns)}
+                           for atr in bios.find('sushy:attributes', ns)}
 
         return BiosProcessResult(tree, attributes_written, bios_attributes)
+
+    def _process_pending_bios_attributes(self, domain_xml,
+                                         pending_attributes=None):
+        """Process Libvirt domain XML for pending BIOS attributes
+
+        When pending_attributes is None, reads existing pending attributes.
+        When a dict, writes them (or clears if empty).
+
+        :returns: BiosProcessResult
+        """
+        tree, bios, ns = self._find_bios_element(domain_xml)
+        pending = bios.find('sushy:pending_attributes', ns)
+
+        if pending_attributes is not None:
+            if pending is not None:
+                bios.remove(pending)
+            if pending_attributes:
+                pending = ET.SubElement(
+                    bios,
+                    '{%s}pending_attributes' % SUSHY_NAMESPACE)
+                for key, value in sorted(pending_attributes.items()):
+                    if not isinstance(value, str):
+                        value = str(value)
+                    ET.SubElement(
+                        pending,
+                        '{%s}attribute' % SUSHY_NAMESPACE,
+                        name=key, value=value)
+            return BiosProcessResult(tree, True, pending_attributes)
+        else:
+            if pending is None:
+                return BiosProcessResult(tree, False, {})
+            result = {atr.attrib['name']: atr.attrib['value']
+                      for atr in pending}
+            return BiosProcessResult(tree, False, result)
 
     def _process_versions_attributes(
             self,
@@ -970,37 +1017,27 @@ class LibvirtDriver(AbstractSystemsDriver):
             attributes_written: if changes were made to XML,
             versions: dict of firmware versions
         """
-        namespace = 'http://openstack.org/xmlns/libvirt/sushy'
-        ET.register_namespace('sushy', namespace)
-        ns = {'sushy': namespace}
-
-        tree = ET.fromstring(domain_xml)
-        metadata = tree.find('metadata')
-
-        if metadata is None:
-            metadata = ET.SubElement(tree, 'metadata')
-        bios = metadata.find('sushy:bios', ns)
+        tree, bios, ns = self._find_bios_element(domain_xml)
 
         attributes_written = False
-        if bios is None:
-            bios = ET.SubElement(metadata, '{%s}bios' % (namespace))
         versions = bios.find('sushy:versions', ns)
         if versions is not None and update_existing_attributes:
             bios.remove(versions)
             versions = None
         if versions is None:
-            versions = ET.SubElement(bios, '{%s}versions' % (namespace))
+            versions = ET.SubElement(
+                bios, '{%s}versions' % SUSHY_NAMESPACE)
             for key, value in sorted(firmware_versions.items()):
                 if not isinstance(value, str):
                     value = str(value)
                 ET.SubElement(versions,
-                              '{%s}version' % (namespace),
+                              '{%s}version' % SUSHY_NAMESPACE,
                               name=key,
                               value=value)
             attributes_written = True
 
         firmware_versions = {ver.attrib['name']: ver.attrib['value']
-                             for ver in tree.find('.//sushy:versions', ns)}
+                             for ver in bios.find('sushy:versions', ns)}
 
         return FirmwareProcessResult(tree, attributes_written,
                                      firmware_versions)
@@ -1038,6 +1075,36 @@ class LibvirtDriver(AbstractSystemsDriver):
 
             except libvirt.libvirtError as e:
                 msg = ('Error updating BIOS attributes'
+                       ' at libvirt URI "%(uri)s": '
+                       '%(error)s' % {'uri': self._uri, 'error': e})
+                raise error.FishyError(msg)
+
+        return result.bios_attributes
+
+    def _process_pending_bios(self, identity, pending_attributes=None):
+        """Process Libvirt domain XML for pending BIOS attributes
+
+        :param identity: libvirt domain name or ID
+        :param pending_attributes: dict to write, empty dict to clear,
+            None to read
+
+        :returns: dict of pending BIOS attributes
+
+        :raises: `error.FishyError` if pending attributes cannot be saved
+        """
+        domain = self._get_domain(identity)
+
+        result = self._process_pending_bios_attributes(
+            domain.XMLDesc(libvirt.VIR_DOMAIN_XML_INACTIVE),
+            pending_attributes)
+
+        if result.attributes_written:
+            try:
+                with libvirt_open(self._uri) as conn:
+                    conn.defineXML(ET.tostring(result.tree).decode('utf-8'))
+
+            except libvirt.libvirtError as e:
+                msg = ('Error updating pending BIOS attributes'
                        ' at libvirt URI "%(uri)s": '
                        '%(error)s' % {'uri': self._uri, 'error': e})
                 raise error.FishyError(msg)
@@ -1103,27 +1170,51 @@ class LibvirtDriver(AbstractSystemsDriver):
         """
         return self._process_versions(identity)
 
+    def get_pending_bios(self, identity):
+        """Get pending BIOS attributes
+
+        :param identity: libvirt domain name or ID
+        :returns: dict of pending BIOS attributes, empty if nothing pending
+        """
+        return self._process_pending_bios(identity)
+
     def set_bios(self, identity, attributes):
-        """Update BIOS attributes
+        """Update BIOS attributes (stored as pending)
 
-        These values do not have any effect on VM. This is a workaround
-        because there is no libvirt API to manage BIOS settings.
-        By storing fake BIOS attributes they are attached to VM and are
-        persisted through VM lifecycle.
-
-        Updates to attributes are immediate unlike in real BIOS that
-        would require system reboot.
+        Attributes are stored as pending and applied on the next reboot
+        or power on via apply_pending_bios().
 
         :param identity: libvirt domain name or ID
         :param attributes: dict of BIOS attributes to update. Can pass only
             attributes that need update, not all
         """
-        bios_attributes = self.get_bios(identity)
+        pending = self.get_pending_bios(identity)
+        pending.update(attributes)
+        self._set_pending_bios(identity, pending)
 
-        bios_attributes.update(attributes)
+    def _set_pending_bios(self, identity, attributes):
+        """Set pending BIOS attributes directly
 
-        self._process_bios(identity, bios_attributes,
+        :param identity: libvirt domain name or ID
+        :param attributes: dict of attributes to set as pending,
+            or empty dict to clear
+        """
+        self._process_pending_bios(identity, attributes if attributes else {})
+
+    def apply_pending_bios(self, identity):
+        """Apply pending BIOS attributes on reboot/power-on
+
+        :param identity: libvirt domain name or ID
+        """
+        pending = self.get_pending_bios(identity)
+        if not pending:
+            return
+
+        current = self.get_bios(identity)
+        current.update(pending)
+        self._process_bios(identity, current,
                            update_existing_attributes=True)
+        self._set_pending_bios(identity, {})
 
     def set_versions(self, identity, firmware_versions):
         """Update firmware versions
@@ -1154,6 +1245,7 @@ class LibvirtDriver(AbstractSystemsDriver):
         """
         self._process_bios(identity, self.DEFAULT_BIOS_ATTRIBUTES,
                            update_existing_attributes=True)
+        self._set_pending_bios(identity, {})
 
     def reset_versions(self, identity):
         """Reset firmware versions to default

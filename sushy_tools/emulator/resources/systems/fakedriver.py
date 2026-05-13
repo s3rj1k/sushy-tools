@@ -177,6 +177,37 @@ class FakeDriver(AbstractSystemsDriver):
         devinfo[device] = (boot_image, write_protected, bool(boot_image))
         self._update(system, boot_image=devinfo)
 
+    DEFAULT_BIOS_ATTRIBUTES = {"BootMode": "Uefi",
+                               "QuietBoot": "true",
+                               "ProcTurboMode": "Enabled"}
+
+    def get_bios(self, identity):
+        system = self._get(identity)
+        return dict(system.get('bios_attributes',
+                               self.DEFAULT_BIOS_ATTRIBUTES))
+
+    def get_pending_bios(self, identity):
+        system = self._get(identity)
+        return dict(system.get('pending_bios', {}))
+
+    def set_bios(self, identity, attributes):
+        pending = self.get_pending_bios(identity)
+        pending.update(attributes)
+        self._update(identity, pending_bios=pending)
+
+    def reset_bios(self, identity):
+        self._update(identity,
+                     bios_attributes=dict(self.DEFAULT_BIOS_ATTRIBUTES),
+                     pending_bios={})
+
+    def apply_pending_bios(self, identity):
+        pending = self.get_pending_bios(identity)
+        if not pending:
+            return
+        current = self.get_bios(identity)
+        current.update(pending)
+        self._update(identity, bios_attributes=current, pending_bios={})
+
     def get_nics(self, identity):
         nics = self._get(identity)['nics']
         return [{'id': nic.get('mac'), 'mac': nic.get('mac')}

@@ -699,6 +699,12 @@ def system_reset_action(identity):
                                'SUSHY_EMULATOR_DISABLE_POWER_OFF configuration'
                                'option.')
 
+    if reset_type in ('On', 'ForceOn', 'ForceRestart', 'GracefulRestart'):
+        try:
+            app.systems.apply_pending_bios(identity)
+        except error.NotSupportedError:
+            pass
+
     app.systems.set_power_state(identity, reset_type)
 
     app.logger.info('System "%s" power state set to "%s"',
@@ -733,14 +739,15 @@ def bios_settings(identity):
         raise error.FeatureNotAvailable("BIOS")
 
     if flask.request.method == 'GET':
-        bios = app.systems.get_bios(identity)
+        pending_bios = app.systems.get_pending_bios(identity)
 
         app.logger.debug('Serving BIOS Settings for system "%s"', identity)
 
         return app.render_template(
             'bios_settings.json',
             identity=identity,
-            bios_pending_attributes=json.dumps(bios, sort_keys=True, indent=6))
+            bios_pending_attributes=json.dumps(
+                pending_bios, sort_keys=True, indent=6))
 
     elif flask.request.method == 'PATCH':
         attributes = flask.request.json.get('Attributes')
