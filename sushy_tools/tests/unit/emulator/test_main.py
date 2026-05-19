@@ -682,6 +682,35 @@ class BiosTestCase(EmulatorTestCase):
         systems_mock.return_value.set_bios.assert_called_once_with(
             'xxxx-yyyy-zzzz', data['Attributes'])
 
+    def test_get_bios_typed_attributes(self, systems_mock):
+        systems_mock.return_value.get_bios.return_value = {
+            "QuietBoot": "true",
+            "NumCores": "10",
+            "BootMode": "Uefi",
+        }
+        response = self.app.get('/redfish/v1/Systems/' + self.uuid + '/BIOS')
+
+        self.assertEqual(200, response.status_code)
+        attrs = response.json['Attributes']
+        self.assertIs(True, attrs['QuietBoot'])
+        self.assertEqual(10, attrs['NumCores'])
+        self.assertIsInstance(attrs['NumCores'], int)
+        self.assertEqual("Uefi", attrs['BootMode'])
+
+    def test_get_bios_settings_typed_attributes(self, systems_mock):
+        systems_mock.return_value.get_pending_bios.return_value = {
+            "QuietBoot": "false",
+            "NumCores": "15",
+        }
+        response = self.app.get(
+            '/redfish/v1/Systems/' + self.uuid + '/BIOS/Settings')
+
+        self.assertEqual(200, response.status_code)
+        attrs = response.json['Attributes']
+        self.assertIs(False, attrs['QuietBoot'])
+        self.assertEqual(15, attrs['NumCores'])
+        self.assertIsInstance(attrs['NumCores'], int)
+
     def test_reset_bios(self, systems_mock):
         response = self.app.post('/redfish/v1/Systems/%s/BIOS/Actions/'
                                  'Bios.ResetBios' % self.uuid)

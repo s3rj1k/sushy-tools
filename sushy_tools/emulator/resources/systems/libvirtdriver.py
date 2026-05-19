@@ -927,7 +927,9 @@ class LibvirtDriver(AbstractSystemsDriver):
             attributes = ET.SubElement(
                 bios, '{%s}attributes' % SUSHY_NAMESPACE)
             for key, value in sorted(bios_attributes.items()):
-                if not isinstance(value, str):
+                if isinstance(value, bool):
+                    value = str(value).lower()
+                elif not isinstance(value, str):
                     value = str(value)
                 ET.SubElement(attributes,
                               '{%s}attribute' % SUSHY_NAMESPACE,
@@ -960,7 +962,9 @@ class LibvirtDriver(AbstractSystemsDriver):
                     bios,
                     '{%s}pending_attributes' % SUSHY_NAMESPACE)
                 for key, value in sorted(pending_attributes.items()):
-                    if not isinstance(value, str):
+                    if isinstance(value, bool):
+                        value = str(value).lower()
+                    elif not isinstance(value, str):
                         value = str(value)
                     ET.SubElement(
                         pending,

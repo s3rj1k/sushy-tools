@@ -44,6 +44,40 @@ from sushy_tools.emulator.resources import volumes as voldriver
 from sushy_tools import error
 
 
+_BIOS_REGISTRY_TYPES = None
+
+
+def _get_bios_registry_types():
+    global _BIOS_REGISTRY_TYPES
+    if _BIOS_REGISTRY_TYPES is None:
+        registry_path = os.path.join(
+            os.path.dirname(__file__), 'templates', 'bios_registry.json')
+        with open(registry_path) as f:
+            registry = json.load(f)
+        _BIOS_REGISTRY_TYPES = {
+            attr['AttributeName']: attr['Type']
+            for attr in registry['RegistryEntries']['Attributes']
+        }
+    return _BIOS_REGISTRY_TYPES
+
+
+def _typed_bios_attributes(attributes):
+    types = _get_bios_registry_types()
+    result = {}
+    for name, value in attributes.items():
+        attr_type = types.get(name)
+        if attr_type == 'Boolean' and isinstance(value, str):
+            result[name] = value.lower() == 'true'
+        elif attr_type == 'Integer' and isinstance(value, str):
+            try:
+                result[name] = int(value)
+            except (ValueError, TypeError):
+                result[name] = value
+        else:
+            result[name] = value
+    return result
+
+
 def _render_error(message):
     return {
         "error": {
@@ -720,7 +754,7 @@ def bios(identity):
     if app.feature_set != "full":
         raise error.FeatureNotAvailable("BIOS")
 
-    bios = app.systems.get_bios(identity)
+    bios = _typed_bios_attributes(app.systems.get_bios(identity))
 
     app.logger.debug('Serving BIOS for system "%s"', identity)
 
@@ -739,7 +773,8 @@ def bios_settings(identity):
         raise error.FeatureNotAvailable("BIOS")
 
     if flask.request.method == 'GET':
-        pending_bios = app.systems.get_pending_bios(identity)
+        pending_bios = _typed_bios_attributes(
+            app.systems.get_pending_bios(identity))
 
         app.logger.debug('Serving BIOS Settings for system "%s"', identity)
 
