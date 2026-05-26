@@ -204,6 +204,34 @@ class AbstractSystemsDriver(metaclass=abc.ABCMeta):
         """
         pass
 
+    def get_pending_versions(self, identity):
+        """Get pending firmware versions for the system
+
+        :returns: key-value pairs of pending firmware versions, or empty dict
+            if nothing is pending
+        """
+        return {}
+
+    def set_pending_versions(self, identity, firmware_versions):
+        """Stage firmware versions as pending
+
+        Stores versions as pending. They will be applied on the next
+        reboot or power on via apply_pending_versions().
+
+        :param firmware_versions: key-value pairs of versions to update
+
+        :raises: `FishyError` if firmware versions cannot be processed
+        """
+        raise error.NotSupportedError('Not implemented')
+
+    def apply_pending_versions(self, identity):
+        """Apply pending firmware versions
+
+        Called on reboot/power-on. Merges pending into current and clears
+        pending. No-op if nothing is pending.
+        """
+        pass
+
     def set_versions(self, identity, firmware_versions):
         """Update firmware versions
 

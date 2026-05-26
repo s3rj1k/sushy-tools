@@ -578,9 +578,50 @@ class SystemsTestCase(EmulatorTestCase):
             'xxxx-yyyy-zzzz', 'On')
 
     @patch_resource('systems')
+    def test_system_reset_applies_pending_versions(self, systems_mock):
+        apply_pending = systems_mock.return_value.apply_pending_versions
+        for reset_type in ('On', 'ForceOn', 'GracefulRestart', 'ForceRestart'):
+            apply_pending.reset_mock()
+            data = {'ResetType': reset_type}
+            response = self.app.post(
+                '/redfish/v1/Systems/xxxx-yyyy-zzzz/Actions/'
+                'ComputerSystem.Reset',
+                json=data)
+            self.assertEqual(204, response.status_code)
+            apply_pending.assert_called_once_with('xxxx-yyyy-zzzz')
+
+    @patch_resource('systems')
+    def test_system_reset_no_pending_versions_on_shutdown(self, systems_mock):
+        apply_pending = systems_mock.return_value.apply_pending_versions
+        for reset_type in ('ForceOff', 'GracefulShutdown'):
+            apply_pending.reset_mock()
+            data = {'ResetType': reset_type}
+            response = self.app.post(
+                '/redfish/v1/Systems/xxxx-yyyy-zzzz/Actions/'
+                'ComputerSystem.Reset',
+                json=data)
+            self.assertEqual(204, response.status_code)
+            apply_pending.assert_not_called()
+
+    @patch_resource('systems')
+    def test_system_reset_pending_versions_not_supported(self, systems_mock):
+        systems_mock.return_value.apply_pending_versions.side_effect = (
+            error.NotSupportedError)
+        data = {'ResetType': 'On'}
+        response = self.app.post(
+            '/redfish/v1/Systems/xxxx-yyyy-zzzz/Actions/'
+            'ComputerSystem.Reset',
+            json=data)
+        self.assertEqual(204, response.status_code)
+        systems_mock.return_value.set_power_state.assert_called_once_with(
+            'xxxx-yyyy-zzzz', 'On')
+
+    @patch_resource('systems')
     def test_system_reset_action_fail(self, systems_mock):
         self.app.application.config['SUSHY_EMULATOR_DISABLE_POWER_OFF'] = True
-        print(self.app.application.config)
+        self.addCleanup(
+            self.app.application.config.__setitem__,
+            'SUSHY_EMULATOR_DISABLE_POWER_OFF', False)
 
         for reset_type in ('ForceOff', 'GracefulShutdown'):
             data = {'ResetType': reset_type}

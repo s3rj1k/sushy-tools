@@ -85,7 +85,8 @@ def update_service_simple_update():
         firmware_versions = {"BiosVersion": bios_version}
 
         try:
-            flask.current_app.systems.set_versions(uuid, firmware_versions)
+            flask.current_app.systems.set_pending_versions(
+                uuid, firmware_versions)
         except error.NotSupportedError as ex:
             api_utils.warning('System failed to update bios with exception %s',
                               ex)
@@ -93,6 +94,7 @@ def update_service_simple_update():
             return flask.render_template('error.json', message=message), 500
 
         api_utils.info(
-            'Emulated BIOS upgrade has been successful for '
-            'System %s, new version is "%s".', uuid, bios_version)
+            'Emulated BIOS upgrade staged for System %s, '
+            'new version "%s" will be applied on next reboot.',
+            uuid, bios_version)
     return '', 204, {'Location': '/redfish/v1/TaskService/Tasks/42'}

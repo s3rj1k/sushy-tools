@@ -92,12 +92,12 @@ class UpdateServiceTestCase(test_main.EmulatorTestCase):
             'Targets': ['/redfish/v1/Systems/'
                         'zzzz-yyyy-xxxx']
         }
-        set_versions = systems_mock.set_versions
+        set_pending_versions = systems_mock.set_pending_versions
         response = self.app.post('/redfish/v1/UpdateService/Actions/'
                                  'UpdateService.SimpleUpdate', json=args)
         self.assertEqual(204, response.status_code)
-        set_versions.assert_called_once_with('zzzz-yyyy-xxxx',
-                                             {'BiosVersion': '1.1.0'})
+        set_pending_versions.assert_called_once_with('zzzz-yyyy-xxxx',
+                                                     {'BiosVersion': '1.1.0'})
 
     def test_update_service_invalid_params(self):
         args = {

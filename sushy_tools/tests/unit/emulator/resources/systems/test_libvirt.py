@@ -1297,6 +1297,111 @@ class LibvirtDriverTestCase(base.BaseTestCase):
                           'xxx-yyy-zzz',
                           {"BiosVersion" "1.0.0"})
 
+    @mock.patch('libvirt.open', autospec=True)
+    def test_get_pending_versions_empty(self, libvirt_mock):
+        with open('sushy_tools/tests/unit/emulator/domain_versions.xml') as f:
+            domain_xml = f.read()
+
+        conn_mock = libvirt_mock.return_value
+        domain_mock = conn_mock.lookupByUUID.return_value
+        domain_mock.XMLDesc.return_value = domain_xml
+
+        pending = self.test_driver.get_pending_versions(self.uuid)
+        self.assertEqual({}, pending)
+
+    @mock.patch('libvirt.open', autospec=True)
+    def test_get_pending_versions_existing(self, libvirt_mock):
+        with open('sushy_tools/tests/unit/emulator/'
+                  'domain_versions_pending.xml') as f:
+            domain_xml = f.read()
+
+        conn_mock = libvirt_mock.return_value
+        domain_mock = conn_mock.lookupByUUID.return_value
+        domain_mock.XMLDesc.return_value = domain_xml
+
+        pending = self.test_driver.get_pending_versions(self.uuid)
+        self.assertEqual({"BiosVersion": "1.1.0"}, pending)
+
+    @mock.patch('libvirt.open', autospec=True)
+    def test_apply_pending_versions(self, libvirt_mock):
+        with open('sushy_tools/tests/unit/emulator/'
+                  'domain_versions_pending.xml') as f:
+            domain_xml = f.read()
+
+        conn_mock = libvirt_mock.return_value
+        domain_mock = conn_mock.lookupByUUID.return_value
+        domain_mock.XMLDesc.return_value = domain_xml
+
+        with mock.patch.object(
+                self.test_driver, 'get_power_state', return_value='Off'):
+            self.test_driver.apply_pending_versions(self.uuid)
+
+        self.assertTrue(conn_mock.defineXML.called)
+
+    @mock.patch('libvirt.open', autospec=True)
+    def test_apply_pending_versions_empty(self, libvirt_mock):
+        with open('sushy_tools/tests/unit/emulator/domain_versions.xml') as f:
+            domain_xml = f.read()
+
+        conn_mock = libvirt_mock.return_value
+        domain_mock = conn_mock.lookupByUUID.return_value
+        domain_mock.XMLDesc.return_value = domain_xml
+
+        self.test_driver.apply_pending_versions(self.uuid)
+        conn_mock.defineXML.assert_not_called()
+
+    def test__process_pending_versions_attributes_read_empty(self):
+        with open('sushy_tools/tests/unit/emulator/domain_versions.xml') as f:
+            domain_xml = f.read()
+
+        result = self.test_driver._process_pending_versions_attributes(
+            domain_xml)
+        self.assertFalse(result.attributes_written)
+        self.assertEqual({}, result.firmware_versions)
+
+    def test__process_pending_versions_attributes_read_existing(self):
+        with open('sushy_tools/tests/unit/emulator/'
+                  'domain_versions_pending.xml') as f:
+            domain_xml = f.read()
+
+        result = self.test_driver._process_pending_versions_attributes(
+            domain_xml)
+        self.assertFalse(result.attributes_written)
+        self.assertEqual({"BiosVersion": "1.1.0"},
+                         result.firmware_versions)
+
+    def test__process_pending_versions_attributes_write(self):
+        with open('sushy_tools/tests/unit/emulator/domain_versions.xml') as f:
+            domain_xml = f.read()
+
+        result = self.test_driver._process_pending_versions_attributes(
+            domain_xml,
+            {"BiosVersion": "1.1.0"})
+        self.assertTrue(result.attributes_written)
+        self.assertEqual({"BiosVersion": "1.1.0"},
+                         result.firmware_versions)
+
+        ns = {'sushy': 'http://openstack.org/xmlns/libvirt/sushy'}
+        pending = (result.tree.find('metadata')
+                   .find('sushy:bios', ns)
+                   .find('sushy:pending_versions', ns))
+        self.assertIsNotNone(pending)
+
+    def test__process_pending_versions_attributes_clear(self):
+        with open('sushy_tools/tests/unit/emulator/'
+                  'domain_versions_pending.xml') as f:
+            domain_xml = f.read()
+
+        result = self.test_driver._process_pending_versions_attributes(
+            domain_xml, {})
+        self.assertTrue(result.attributes_written)
+
+        ns = {'sushy': 'http://openstack.org/xmlns/libvirt/sushy'}
+        pending = (result.tree.find('metadata')
+                   .find('sushy:bios', ns)
+                   .find('sushy:pending_versions', ns))
+        self.assertIsNone(pending)
+
     @mock.patch('libvirt.openReadOnly', autospec=True)
     def test_get_nics(self, libvirt_mock):
         with open('sushy_tools/tests/unit/emulator/domain_nics.xml') as f:

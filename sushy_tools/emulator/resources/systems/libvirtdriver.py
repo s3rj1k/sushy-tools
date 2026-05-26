@@ -1046,6 +1046,40 @@ class LibvirtDriver(AbstractSystemsDriver):
         return FirmwareProcessResult(tree, attributes_written,
                                      firmware_versions)
 
+    def _process_pending_versions_attributes(self, domain_xml,
+                                             pending_versions=None):
+        """Process Libvirt domain XML for pending firmware versions
+
+        When pending_versions is None, reads existing pending versions.
+        When a dict, writes them (or clears if empty).
+
+        :returns: FirmwareProcessResult
+        """
+        tree, bios, ns = self._find_bios_element(domain_xml)
+        pending = bios.find('sushy:pending_versions', ns)
+
+        if pending_versions is not None:
+            if pending is not None:
+                bios.remove(pending)
+            if pending_versions:
+                pending = ET.SubElement(
+                    bios,
+                    '{%s}pending_versions' % SUSHY_NAMESPACE)
+                for key, value in sorted(pending_versions.items()):
+                    if not isinstance(value, str):
+                        value = str(value)
+                    ET.SubElement(
+                        pending,
+                        '{%s}version' % SUSHY_NAMESPACE,
+                        name=key, value=value)
+            return FirmwareProcessResult(tree, True, pending_versions)
+        else:
+            if pending is None:
+                return FirmwareProcessResult(tree, False, {})
+            result = {ver.attrib['name']: ver.attrib['value']
+                      for ver in pending}
+            return FirmwareProcessResult(tree, False, result)
+
     def _process_bios(self, identity,
                       bios_attributes=DEFAULT_BIOS_ATTRIBUTES,
                       update_existing_attributes=False):
@@ -1153,6 +1187,36 @@ class LibvirtDriver(AbstractSystemsDriver):
                 raise error.FishyError(msg)
         return result.firmware_versions
 
+    def _process_pending_versions(self, identity, pending_versions=None):
+        """Process Libvirt domain XML for pending firmware versions
+
+        :param identity: libvirt domain name or ID
+        :param pending_versions: dict to write, empty dict to clear,
+            None to read
+
+        :returns: dict of pending firmware versions
+
+        :raises: `error.FishyError` if pending versions cannot be saved
+        """
+        domain = self._get_domain(identity)
+
+        result = self._process_pending_versions_attributes(
+            domain.XMLDesc(libvirt.VIR_DOMAIN_XML_INACTIVE),
+            pending_versions)
+
+        if result.attributes_written:
+            try:
+                with libvirt_open(self._uri) as conn:
+                    conn.defineXML(ET.tostring(result.tree).decode('utf-8'))
+
+            except libvirt.libvirtError as e:
+                msg = ('Error updating pending firmware versions'
+                       ' at libvirt URI "%(uri)s": '
+                       '%(error)s' % {'uri': self._uri, 'error': e})
+                raise error.FishyError(msg)
+
+        return result.firmware_versions
+
     def get_bios(self, identity):
         """Get BIOS section
 
@@ -1220,16 +1284,56 @@ class LibvirtDriver(AbstractSystemsDriver):
                            update_existing_attributes=True)
         self._set_pending_bios(identity, {})
 
+    def get_pending_versions(self, identity):
+        """Get pending firmware versions
+
+        :param identity: libvirt domain name or ID
+        :returns: dict of pending firmware versions, empty if nothing pending
+        """
+        return self._process_pending_versions(identity)
+
+    def set_pending_versions(self, identity, firmware_versions):
+        """Stage firmware versions as pending (applied on next reboot)
+
+        :param identity: libvirt domain name or ID
+        :param firmware_versions: dict of firmware versions to stage
+        """
+        pending = self.get_pending_versions(identity)
+        pending.update(firmware_versions)
+        self._set_pending_versions(identity, pending)
+
+    def _set_pending_versions(self, identity, firmware_versions):
+        """Set pending firmware versions directly
+
+        :param identity: libvirt domain name or ID
+        :param firmware_versions: dict of versions to set as pending,
+            or empty dict to clear
+        """
+        self._process_pending_versions(
+            identity, firmware_versions if firmware_versions else {})
+
+    def apply_pending_versions(self, identity):
+        """Apply pending firmware versions on reboot/power-on
+
+        :param identity: libvirt domain name or ID
+        """
+        pending = self.get_pending_versions(identity)
+        if not pending:
+            return
+
+        self.set_versions(identity, pending)
+        self._set_pending_versions(identity, {})
+
     def set_versions(self, identity, firmware_versions):
-        """Update firmware versions
+        """Update firmware versions directly
 
         These values do not have any effect on VM. This is a workaround
         because there is no libvirt API to manage firmware versions.
         By storing fake firmware versions they are attached to VM and are
         persisted through VM lifecycle.
 
-        Updates to versions are immediate unlike in real firmware that
-        would require system reboot.
+        For BIOS firmware updates via SimpleUpdate, use set_pending_versions()
+        instead — the pending version will be applied on next reboot.
 
         :param identity: libvirt domain name or ID
         :param firmware_versions: dict of firmware versions to update.

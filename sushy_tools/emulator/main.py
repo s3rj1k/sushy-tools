@@ -738,6 +738,10 @@ def system_reset_action(identity):
             app.systems.apply_pending_bios(identity)
         except error.NotSupportedError:
             pass
+        try:
+            app.systems.apply_pending_versions(identity)
+        except error.NotSupportedError:
+            pass
 
     app.systems.set_power_state(identity, reset_type)
 
