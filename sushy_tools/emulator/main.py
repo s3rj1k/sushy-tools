@@ -519,7 +519,7 @@ def manager_resource(identity):
                     for ch in chassis if app.feature_set == "full"
                     ]
                 },
-            "@odata.id": "/redfish/v1/Managers/%s" % uuid,
+            "@odata.id": "/redfish/v1/Managers/%s" % manager['Id'],
             }
 
         if app.feature_set == "full":

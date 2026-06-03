@@ -97,6 +97,11 @@ class LibvirtDriver(AbstractSystemsDriver):
 
     INTERFACE_MAP_REV = {v: k for k, v in INTERFACE_MAP.items()}
 
+    # When True, expose the libvirt domain name (instead of its UUID) as the
+    # Redfish identity (Id / URL segment). Toggled by
+    # SUSHY_EMULATOR_IDENTITY_AS_NAME; the UUID field is unaffected.
+    SUSHY_EMULATOR_IDENTITY_AS_NAME = False
+
     LIBVIRT_URI = 'qemu:///system'
 
     BOOT_MODE_AUTO_FW_MAP = {
@@ -191,6 +196,8 @@ class LibvirtDriver(AbstractSystemsDriver):
             cls._config.get('SUSHY_EMULATOR_IGNORE_BOOT_DEVICE', False)
         cls.STORAGE_POOL = cls._config.get(
             'SUSHY_EMULATOR_STORAGE_POOL', cls.STORAGE_POOL)
+        cls.SUSHY_EMULATOR_IDENTITY_AS_NAME = cls._config.get(
+            'SUSHY_EMULATOR_IDENTITY_AS_NAME', False)
         cls._http_boot_uri = None
         return cls
 
@@ -200,7 +207,7 @@ class LibvirtDriver(AbstractSystemsDriver):
             try:
                 uu_identity = uuid.UUID(identity)
 
-                return conn.lookupByUUID(uu_identity.bytes)
+                domain = conn.lookupByUUID(uu_identity.bytes)
 
             except (ValueError, libvirt.libvirtError):
                 try:
@@ -216,7 +223,18 @@ class LibvirtDriver(AbstractSystemsDriver):
 
                     raise error.NotFound(msg)
 
-            raise error.AliasAccessError(domain.UUIDString())
+                # Looked up by name. When names are the canonical identity,
+                # serve it directly; otherwise redirect to the UUID.
+                if self.SUSHY_EMULATOR_IDENTITY_AS_NAME:
+                    return domain
+                raise error.AliasAccessError(domain.UUIDString())
+
+            else:
+                # Looked up by UUID. Redirect to the name when names are the
+                # canonical identity; otherwise serve it directly.
+                if self.SUSHY_EMULATOR_IDENTITY_AS_NAME:
+                    raise error.AliasAccessError(domain.name())
+                return domain
 
     # Copied from nova/virt/libvirt/guest.py
     def get_xml_desc(self, domain, dump_inactive=True,
@@ -244,9 +262,12 @@ class LibvirtDriver(AbstractSystemsDriver):
     def systems(self):
         """Return available computer systems
 
-        :returns: list of UUIDs representing the systems
+        :returns: list of identities (UUIDs, or domain names when
+            SUSHY_EMULATOR_IDENTITY_AS_NAME is set) representing the systems
         """
         with libvirt_open(self._uri, readonly=True) as conn:
+            if self.SUSHY_EMULATOR_IDENTITY_AS_NAME:
+                return [domain.name() for domain in conn.listAllDomains()]
             return [domain.UUIDString() for domain in conn.listAllDomains()]
 
     def uuid(self, identity):
@@ -271,6 +292,17 @@ class LibvirtDriver(AbstractSystemsDriver):
         """
         domain = self._get_domain(identity, readonly=True)
         return domain.name()
+
+    def identity(self, identity):
+        """Canonical Redfish identity: domain name when configured, else UUID.
+
+        :param identity: libvirt domain name or UUID
+        :raises: NotFound if the system cannot be found
+        :returns: domain name or UUID per SUSHY_EMULATOR_IDENTITY_AS_NAME
+        """
+        if self.SUSHY_EMULATOR_IDENTITY_AS_NAME:
+            return self.name(identity)
+        return self.uuid(identity)
 
     def get_power_state(self, identity):
         """Get computer system power state

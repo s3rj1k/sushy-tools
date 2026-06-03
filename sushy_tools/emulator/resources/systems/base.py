@@ -69,6 +69,16 @@ class AbstractSystemsDriver(metaclass=abc.ABCMeta):
         :returns: computer system name
         """
 
+    def identity(self, identity):
+        """Canonical Redfish identity (the ``Id`` and URL segment).
+
+        Defaults to the UUID; drivers may override to expose a different
+        stable identity (for example, the libvirt domain name).
+
+        :returns: the canonical identity string
+        """
+        return self.uuid(identity)
+
     @abc.abstractmethod
     def get_power_state(self, identity):
         """Get computer system power state

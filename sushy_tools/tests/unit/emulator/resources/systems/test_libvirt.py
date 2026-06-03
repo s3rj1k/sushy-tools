@@ -1772,3 +1772,48 @@ class LibvirtDriverTestCase(base.BaseTestCase):
         self.assertEqual('secure-boot', secure_boot[0].get('name'))
         self.assertEqual('no', secure_boot[0].get('enabled'))
         conn_mock.defineXML.assert_called_once_with(mock.ANY)
+
+
+class LibvirtDriverIdentityAsNameTestCase(base.BaseTestCase):
+    """Driver behaviour when SUSHY_EMULATOR_IDENTITY_AS_NAME is enabled."""
+
+    name = 'QEmu-fedora-i686'
+    uuid = 'c7a5fdbd-cdaf-9455-926a-d65c16db1809'
+
+    def setUp(self):
+        test_driver_class = LibvirtDriver.initialize(
+            {'SUSHY_EMULATOR_IDENTITY_AS_NAME': True}, mock.MagicMock())
+        self.test_driver = test_driver_class()
+        super(LibvirtDriverIdentityAsNameTestCase, self).setUp()
+
+    @mock.patch('libvirt.openReadOnly', autospec=True)
+    def test_systems_returns_names(self, libvirt_mock):
+        conn_mock = libvirt_mock.return_value
+        domain = mock.MagicMock()
+        domain.name.return_value = self.name
+        conn_mock.listAllDomains.return_value = [domain]
+        self.assertEqual([self.name], self.test_driver.systems)
+
+    @mock.patch('libvirt.open', autospec=True)
+    def test_get_domain_by_name_served_directly(self, libvirt_mock):
+        conn_mock = libvirt_mock.return_value
+        domain_mock = conn_mock.lookupByName.return_value
+        self.assertIs(domain_mock, self.test_driver._get_domain(self.name))
+
+    @mock.patch('libvirt.open', autospec=True)
+    def test_get_domain_by_uuid_aliases_to_name(self, libvirt_mock):
+        conn_mock = libvirt_mock.return_value
+        conn_mock.lookupByUUID.return_value.name.return_value = self.name
+        exc = self.assertRaises(
+            error.AliasAccessError, self.test_driver._get_domain, self.uuid)
+        self.assertEqual(self.name, exc.args[0])
+
+    @mock.patch('libvirt.openReadOnly', autospec=True)
+    def test_identity_is_name_while_uuid_unchanged(self, libvirt_mock):
+        conn_mock = libvirt_mock.return_value
+        domain_mock = conn_mock.lookupByName.return_value
+        domain_mock.name.return_value = self.name
+        domain_mock.UUIDString.return_value = self.uuid
+        # Id follows the name, but the UUID (and thus SerialNumber) is intact.
+        self.assertEqual(self.name, self.test_driver.identity(self.name))
+        self.assertEqual(self.uuid, self.test_driver.uuid(self.name))

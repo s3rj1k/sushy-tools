@@ -41,7 +41,7 @@ class FakeDriver(base.DriverBase):
             self._logger.error(msg)
             raise error.NotFound(msg)
         else:
-            result = {'Id': system_uuid,
+            result = {'Id': self._systems.identity(identity),
                       'UUID': system_uuid,
                       'Name': '%s-Manager' % system_name}
 
@@ -94,9 +94,9 @@ class FakeDriver(base.DriverBase):
         """Get systems managed by this manager.
 
         :param manager: Redfish manager object.
-        :returns: List of Redfish system UUIDs.
+        :returns: List of Redfish system identities.
         """
-        return [manager['UUID']]
+        return [manager['Id']]
 
     def get_managed_chassis(self, manager):
         """Get chassis managed by this manager.
@@ -104,7 +104,7 @@ class FakeDriver(base.DriverBase):
         :param manager: Redfish manager object.
         :returns: List of Redfish chassis UUIDs.
         """
-        if manager['UUID'] == self.managers[0]:
+        if manager['Id'] == self.managers[0]:
             return self._chassis.chassis
         else:
             return []
@@ -112,7 +112,7 @@ class FakeDriver(base.DriverBase):
     def get_managers_for_system(self, ident):
         """Get managers that manage the given system.
 
-        :param ident: System UUID.
-        :returns: list of UUIDs representing the managers
+        :param ident: System identity.
+        :returns: list of identities representing the managers
         """
-        return [self._systems.uuid(ident)]
+        return [self._systems.identity(ident)]

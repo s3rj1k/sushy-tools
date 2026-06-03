@@ -26,11 +26,12 @@ virtual_media = flask.Blueprint(
 def virtual_media_collection_resource(identity):
     api_utils.debug('Serving virtual media resources for system "%s"',
                     identity)
+    # Resolve the system to trigger the canonical-identity redirect / 404.
+    flask.current_app.systems.uuid(identity)
 
     return flask.render_template(
         'virtual_media_collection.json',
         identity=identity,
-        uuid=flask.current_app.systems.uuid(identity),
         devices=flask.current_app.vmedia.devices
     )
 

@@ -29,6 +29,8 @@ class FakeDriverTestCase(base.BaseTestCase):
         self.systems = mock.Mock(systems=[self.identity])
         self.systems.uuid.return_value = 'xxx'
         self.systems.name.return_value = 'name'
+        # By default the canonical identity is the UUID.
+        self.systems.identity.return_value = 'xxx'
         self.manager = {'UUID': self.identity,
                         'Id': self.identity,
                         'Name': 'name-Manager'}
@@ -47,6 +49,14 @@ class FakeDriverTestCase(base.BaseTestCase):
     def test_get_manager_by_uuid(self):
         manager = self.test_driver.get_manager('xxx')
         self.assertEqual(self.manager, manager)
+
+    def test_get_manager_id_uses_systems_identity(self):
+        # When the systems driver exposes the name as the identity, the
+        # manager Id follows it while UUID stays the real UUID.
+        self.systems.identity.return_value = 'node1'
+        manager = self.test_driver.get_manager('xxx')
+        self.assertEqual('node1', manager['Id'])
+        self.assertEqual('xxx', manager['UUID'])
 
     def test_managers(self):
         result = self.test_driver.managers
