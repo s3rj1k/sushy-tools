@@ -16,6 +16,10 @@
     "PowerState": {{ power_state|string|tojson }},
     {%- endif %}
     "Boot": {
+        "BootOrder": [],
+        "BootOptions": {
+            "@odata.id": {{ "/redfish/v1/Systems/%s/BootOptions"|format(identity)|tojson }}
+        },
         {%- if boot_source_target %}
         "BootSourceOverrideEnabled": "Continuous",
         "BootSourceOverrideTarget": {{ boot_source_target|string|tojson }},

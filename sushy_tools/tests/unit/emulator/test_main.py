@@ -986,6 +986,51 @@ class ConditionalResourceAdvertisingTestCase(EmulatorTestCase):
         self.assertNotIn('Storage', response.json)
 
 
+class BootOptionsTestCase(EmulatorTestCase):
+
+    @patch_resource('systems')
+    def test_boot_options_collection_empty_stub(self, systems_mock):
+        response = self.app.get(
+            'redfish/v1/Systems/%s/BootOptions' % self.uuid)
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual('#BootOptionCollection.BootOptionCollection',
+                         response.json['@odata.type'])
+        self.assertEqual('Boot Options', response.json['Name'])
+        self.assertEqual(0, response.json['Members@odata.count'])
+        self.assertEqual([], response.json['Members'])
+        self.assertEqual(
+            '/redfish/v1/Systems/%s/BootOptions' % self.uuid,
+            response.json['@odata.id'])
+
+    @patch_resource('storage')
+    @patch_resource('indicators')
+    @patch_resource('chassis')
+    @patch_resource('managers')
+    @patch_resource('systems')
+    def test_system_boot_exposes_bootoptions_link(
+            self, systems_mock, managers_mock, chassis_mock,
+            indicators_mock, storage_mock):
+        systems_mock = systems_mock.return_value
+        systems_mock.uuid.return_value = 'zzzz-yyyy-xxxx'
+        systems_mock.get_power_state.return_value = 'On'
+        systems_mock.get_total_memory.return_value = 1
+        systems_mock.get_total_cpus.return_value = 2
+        systems_mock.get_boot_device.return_value = 'Cd'
+        systems_mock.get_boot_mode.return_value = 'Legacy'
+        managers_mock.return_value.get_managers_for_system.return_value = []
+        chassis_mock.return_value.chassis = []
+        indicators_mock.return_value.get_indicator_state.return_value = 'Off'
+
+        response = self.app.get('/redfish/v1/Systems/xxxx-yyyy-zzzz')
+
+        self.assertEqual(200, response.status_code)
+        self.assertEqual([], response.json['Boot']['BootOrder'])
+        self.assertEqual(
+            '/redfish/v1/Systems/xxxx-yyyy-zzzz/BootOptions',
+            response.json['Boot']['BootOptions']['@odata.id'])
+
+
 @patch_resource('systems')
 class EthernetInterfacesTestCase(EmulatorTestCase):
 

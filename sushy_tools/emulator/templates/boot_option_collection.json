@@ -1,0 +1,9 @@
+{
+    "@odata.type": "#BootOptionCollection.BootOptionCollection",
+    "Name": "Boot Options",
+    "Members@odata.count": 0,
+    "Members": [],
+    "Oem": {},
+    "@odata.context": "/redfish/v1/$metadata#BootOptionCollection.BootOptionCollection",
+    "@odata.id": {{ "/redfish/v1/Systems/%s/BootOptions"|format(identity)|tojson }}
+}

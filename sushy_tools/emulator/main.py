@@ -759,6 +759,18 @@ def system_resource(identity):
         return '', 204
 
 
+@app.route('/redfish/v1/Systems/<identity>/BootOptions', methods=['GET'])
+@api_utils.ensure_instance_access
+@api_utils.returns_json
+def boot_options_collection(identity):
+    # Some Redfish clients require Boot.BootOptions to be navigable; expose an
+    # always-empty BootOptionCollection so their boot-order lookup succeeds.
+    app.systems.uuid(identity)
+
+    return app.render_template(
+        'boot_option_collection.json', identity=identity)
+
+
 @app.route('/redfish/v1/Systems/<identity>/EthernetInterfaces',
            methods=['GET'])
 @api_utils.ensure_instance_access
