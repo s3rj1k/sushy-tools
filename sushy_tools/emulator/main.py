@@ -238,6 +238,103 @@ app.register_blueprint(vmctl.virtual_media)
 app.register_blueprint(usctl.update_service)
 
 
+# Redfish $expand (DSP0266): inline @odata.id refs in JSON responses,
+# applied generically to every endpoint via after_request. Variants:
+#   "."  expand subordinate refs (everything except the Links section)
+#   "~"  expand only refs inside the Links section
+#   "*"  expand both
+# "($levels=N)" sets depth (default 1). Lets a client retrieve a resource
+# and its referenced members in a single request.
+def _is_redfish_ref(node):
+    return (isinstance(node, dict) and node
+            and all(k.startswith('@odata.') for k in node)
+            and isinstance(node.get('@odata.id'), str))
+
+
+def _parse_expand(spec):
+    spec = (spec or '').strip()
+    if not spec or spec[0] not in ('.', '*', '~'):
+        return None
+    etype, rest, levels = spec[0], spec[1:], 1
+    if rest:
+        if not (rest.startswith('($levels=') and rest.endswith(')')):
+            return None
+        try:
+            levels = int(rest[len('($levels='):-1])
+        except ValueError:
+            return None
+    return etype, max(levels, 1)
+
+
+def _expand_node(node, in_links, etype, levels, fetch):
+    if levels < 1:
+        return node
+    if isinstance(node, list):
+        return [_expand_node(v, in_links, etype, levels, fetch) for v in node]
+    if not isinstance(node, dict):
+        return node
+    if _is_redfish_ref(node):
+        want = (etype == '*'
+                or (etype == '.' and not in_links)
+                or (etype == '~' and in_links))
+        if want:
+            full = fetch(node['@odata.id'])
+            if full is not None:
+                return _expand_node(full, False, etype, levels - 1, fetch)
+        return node
+    return {k: _expand_node(v, in_links or k == 'Links', etype, levels, fetch)
+            for k, v in node.items()}
+
+
+def _expand_max_levels():
+    # Cap on $expand depth (DoS guard). Default 5; override via the
+    # SUSHY_EMULATOR_EXPAND_MAX_LEVELS env var (or config file).
+    val = (app.config.get('SUSHY_EMULATOR_EXPAND_MAX_LEVELS')
+           or os.environ.get('SUSHY_EMULATOR_EXPAND_MAX_LEVELS'))
+    try:
+        return max(int(val), 1)
+    except (TypeError, ValueError):
+        return 5
+
+
+@app.after_request
+def _redfish_expand(response):
+    parsed = _parse_expand(flask.request.args.get('$expand'))
+    if parsed is None or response.status_code != 200:
+        return response
+    if response.mimetype != 'application/json':
+        return response
+    try:
+        body = json.loads(response.get_data())
+    except (ValueError, TypeError):
+        return response
+    if not isinstance(body, dict):
+        return response
+
+    etype, levels = parsed
+    levels = min(levels, _expand_max_levels())
+    cache = {}
+
+    def fetch(odata_id):
+        # Dispatch internally: the WSGI auth middleware already authorized the
+        # outer request (and strips the credentials), so re-fetching via the
+        # public stack would 401. full_dispatch_request bypasses that layer.
+        if odata_id not in cache:
+            cache[odata_id] = None
+            try:
+                with app.test_request_context(odata_id):
+                    sub = app.full_dispatch_request()
+                if sub.status_code == 200:
+                    cache[odata_id] = json.loads(sub.get_data())
+            except Exception:  # best-effort; leave ref unexpanded
+                pass
+        return cache[odata_id]
+
+    expanded = _expand_node(body, False, etype, levels, fetch)
+    response.set_data(json.dumps(expanded))
+    return response
+
+
 @app.errorhandler(Exception)
 @api_utils.returns_json
 def all_exception_handler(message):
