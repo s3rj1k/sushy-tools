@@ -1406,9 +1406,69 @@ class LibvirtDriver(AbstractSystemsDriver):
         """
         domain = self._get_domain(identity, readonly=True)
         tree = ET.fromstring(domain.XMLDesc(libvirt.VIR_DOMAIN_XML_INACTIVE))
-        return [{'id': iface.get('address'), 'mac': iface.get('address')}
-                for iface in tree.findall(
-                ".//devices/interface/mac")]
+        # Map each PCI controller index to its own address. libvirt numbers a
+        # device's `bus` after the controller `index` that provides it, so this
+        # lets us walk the bridge chain when building a UEFI device path.
+        controllers = {}
+        for ctrl in tree.findall(".//devices/controller[@type='pci']"):
+            addr = ctrl.find("address[@type='pci']")
+            if ctrl.get('index') is not None and addr is not None:
+                controllers[int(ctrl.get('index'), 0)] = addr
+
+        nics = []
+        for iface in tree.findall(".//devices/interface"):
+            mac_element = iface.find('mac')
+            if mac_element is None:
+                continue
+            mac = mac_element.get('address')
+            nic = {'id': mac, 'mac': mac}
+            uefi = self._uefi_device_path(
+                iface.find("address[@type='pci']"), controllers, mac)
+            if uefi:
+                nic['uefi_device_path'] = uefi
+            nics.append(nic)
+        return nics
+
+    @staticmethod
+    def _uefi_device_path(address, controllers, mac):
+        """Build a UEFI device path (PciRoot/Pci.../MAC) for an interface.
+
+        Walks the PCI bridge chain (libvirt controller index == bus number)
+        from the interface up to the root complex. Returns None when the
+        topology cannot be resolved (e.g. the interface has no PCI address).
+        """
+        if address is None:
+            return None
+        try:
+            pci_domain = int(address.get('domain', '0x0'), 0)
+            bus = int(address.get('bus', '0x0'), 0)
+            slot = int(address.get('slot', '0x0'), 0)
+            func = int(address.get('function', '0x0'), 0)
+        except (TypeError, ValueError):
+            return None
+
+        segments = []
+        seen = set()
+        while True:
+            segments.append((slot, func))
+            if bus == 0:
+                break
+            ctrl = controllers.get(bus)
+            if ctrl is None or bus in seen:
+                return None
+            seen.add(bus)
+            try:
+                bus = int(ctrl.get('bus', '0x0'), 0)
+                slot = int(ctrl.get('slot', '0x0'), 0)
+                func = int(ctrl.get('function', '0x0'), 0)
+            except (TypeError, ValueError):
+                return None
+
+        segments.reverse()
+        path = 'PciRoot(0x%x)' % pci_domain
+        for slot, func in segments:
+            path += '/Pci(0x%x,0x%x)' % (slot, func)
+        return path + '/MAC(%s,0x1)' % mac.replace(':', '').upper()
 
     def get_processors(self, identity):
         """Get list of processors

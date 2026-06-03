@@ -70,6 +70,83 @@ class LibvirtDriverTestCase(base.BaseTestCase):
         self.assertEqual([self.uuid], systems)
 
     @mock.patch('libvirt.openReadOnly', autospec=True)
+    def test_get_nics_uefi_path_behind_root_port(self, libvirt_mock):
+        # NIC behind one pcie-root-port: PciRoot/Pci/Pci (two Pci nodes, the
+        # shape the pre-change parser required).
+        xml = (
+            "<domain><devices>"
+            "<controller type='pci' index='1' model='pcie-root-port'>"
+            "<address type='pci' domain='0x0000' bus='0x00' slot='0x02'"
+            " function='0x0'/></controller>"
+            "<interface type='network'><mac address='52:54:00:12:34:01'/>"
+            "<address type='pci' domain='0x0000' bus='0x01' slot='0x00'"
+            " function='0x0'/></interface>"
+            "</devices></domain>"
+        )
+        dom = libvirt_mock.return_value.lookupByUUID.return_value
+        dom.XMLDesc.return_value = xml
+        self.assertEqual(
+            [{'id': '52:54:00:12:34:01', 'mac': '52:54:00:12:34:01',
+              'uefi_device_path':
+              'PciRoot(0x0)/Pci(0x2,0x0)/Pci(0x0,0x0)'
+              '/MAC(525400123401,0x1)'}],
+            self.test_driver.get_nics(self.uuid))
+
+    @mock.patch('libvirt.openReadOnly', autospec=True)
+    def test_get_nics_uefi_path_on_root_complex(self, libvirt_mock):
+        # NIC directly on the root complex (bus 0): a single Pci node (the
+        # post-change shape the old fixed-two-node regex rejected).
+        xml = (
+            "<domain><devices>"
+            "<interface type='network'><mac address='52:54:00:00:00:01'/>"
+            "<address type='pci' domain='0x0000' bus='0x00' slot='0x05'"
+            " function='0x0'/></interface>"
+            "</devices></domain>"
+        )
+        dom = libvirt_mock.return_value.lookupByUUID.return_value
+        dom.XMLDesc.return_value = xml
+        self.assertEqual(
+            'PciRoot(0x0)/Pci(0x5,0x0)/MAC(525400000001,0x1)',
+            self.test_driver.get_nics(self.uuid)[0]['uefi_device_path'])
+
+    @mock.patch('libvirt.openReadOnly', autospec=True)
+    def test_get_nics_uefi_path_multi_bridge(self, libvirt_mock):
+        # NIC behind two bridges: three Pci nodes (also post-change).
+        xml = (
+            "<domain><devices>"
+            "<controller type='pci' index='1' model='pcie-root-port'>"
+            "<address type='pci' domain='0x0000' bus='0x00' slot='0x03'"
+            " function='0x0'/></controller>"
+            "<controller type='pci' index='2' model='pcie-to-pci-bridge'>"
+            "<address type='pci' domain='0x0000' bus='0x01' slot='0x00'"
+            " function='0x0'/></controller>"
+            "<interface type='network'><mac address='52:54:00:00:00:02'/>"
+            "<address type='pci' domain='0x0000' bus='0x02' slot='0x00'"
+            " function='0x0'/></interface>"
+            "</devices></domain>"
+        )
+        dom = libvirt_mock.return_value.lookupByUUID.return_value
+        dom.XMLDesc.return_value = xml
+        self.assertEqual(
+            'PciRoot(0x0)/Pci(0x3,0x0)/Pci(0x0,0x0)/Pci(0x0,0x0)'
+            '/MAC(525400000002,0x1)',
+            self.test_driver.get_nics(self.uuid)[0]['uefi_device_path'])
+
+    @mock.patch('libvirt.openReadOnly', autospec=True)
+    def test_get_nics_without_pci_address(self, libvirt_mock):
+        # No PCI address: no UEFI path, original id/mac behaviour preserved.
+        xml = (
+            "<domain><devices>"
+            "<interface type='network'><mac address='52:54:00:00:00:03'/>"
+            "</interface></devices></domain>"
+        )
+        dom = libvirt_mock.return_value.lookupByUUID.return_value
+        dom.XMLDesc.return_value = xml
+        self.assertEqual(
+            [{'id': '52:54:00:00:00:03', 'mac': '52:54:00:00:00:03'}],
+            self.test_driver.get_nics(self.uuid))
+
+    @mock.patch('libvirt.openReadOnly', autospec=True)
     def test_get_power_state_on(self, libvirt_mock):
         conn_mock = libvirt_mock.return_value
         domain_mock = conn_mock.lookupByUUID.return_value
@@ -1412,12 +1489,18 @@ class LibvirtDriverTestCase(base.BaseTestCase):
         domain_mock.XMLDesc.return_value = domain_xml
 
         nics = self.test_driver.get_nics(self.uuid)
+        # 4e:5d:37 is on bus 0 -> single-Pci-node path; 12:31:dd is on bus 1
+        # but the fixture has no controller for it, so its path is omitted;
+        # 33:44:55 has no PCI address, so it is omitted too.
         self.assertEqual([{'id': '00:11:22:33:44:55',
                            'mac': '00:11:22:33:44:55'},
                           {'id': '52:54:00:12:31:dd',
                            'mac': '52:54:00:12:31:dd'},
                           {'id': '52:54:00:4e:5d:37',
-                           'mac': '52:54:00:4e:5d:37'}],
+                           'mac': '52:54:00:4e:5d:37',
+                           'uefi_device_path':
+                           'PciRoot(0x0)/Pci(0x3,0x0)'
+                           '/MAC(5254004E5D37,0x1)'}],
                          sorted(nics, key=lambda k: k['id']))
 
     @mock.patch('libvirt.openReadOnly', autospec=True)

@@ -8,6 +8,9 @@
     },
     "PermanentMACAddress": {{ nic['mac']|string|tojson }},
     "MACAddress": {{ nic['mac']|string|tojson }},
+    {%- if nic.uefi_device_path %}
+    "UefiDevicePath": {{ nic['uefi_device_path']|string|tojson }},
+    {%- endif %}
     "@odata.context": "/redfish/v1/$metadata#EthernetInterface.EthernetInterface",
     "@odata.id": {{ "/redfish/v1/Systems/%s/EthernetInterfaces/%s"|format(identity, nic['id'])|tojson }}
 }
