@@ -644,6 +644,7 @@ def system_resource(identity):
         if boot:
             target = boot.get('BootSourceOverrideTarget')
             mode = boot.get('BootSourceOverrideMode')
+            enabled = boot.get('BootSourceOverrideEnabled')
             http_uri = boot.get('HttpBootUri')
 
             # Clean up HttpBootUri media if boot target changes
@@ -729,11 +730,13 @@ def system_resource(identity):
                         identity, e)
 
             if target:
-                # NOTE(lucasagomes): In libvirt we always set the boot
-                # device frequency to "continuous" so, we are ignoring the
-                # BootSourceOverrideEnabled element here
-
                 app.systems.set_boot_device(identity, target)
+
+                # BootSourceOverrideEnabled=Once -> arm libvirt boot-once.
+                if enabled == 'Once':
+                    app.systems.mark_boot_once(identity)
+                else:
+                    app.systems.clear_boot_once(identity)
 
                 app.logger.info('Set boot device to "%s" for system "%s"',
                                 target, identity)

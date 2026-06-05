@@ -116,6 +116,12 @@ class AbstractSystemsDriver(metaclass=abc.ABCMeta):
         :raises: `FishyError` if boot device can't be set
         """
 
+    def mark_boot_once(self, identity):
+        """Arm a one-time boot; default no-op (libvirt driver only)."""
+
+    def clear_boot_once(self, identity):
+        """Disarm a pending one-time boot; default no-op (libvirt only)."""
+
     def get_boot_mode(self, identity):
         """Get computer system boot mode.
 

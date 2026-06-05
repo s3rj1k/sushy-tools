@@ -22,6 +22,7 @@ import xml.etree.ElementTree as ET
 from sushy_tools.emulator import constants
 from sushy_tools.emulator import memoize
 from sushy_tools.emulator.resources.systems.base import AbstractSystemsDriver
+from sushy_tools.emulator.resources.systems import boot_once
 from sushy_tools import error
 
 try:
@@ -90,6 +91,9 @@ class LibvirtDriver(AbstractSystemsDriver):
     }
 
     DISK_DEVICE_MAP_REV = {v: k for k, v in DISK_DEVICE_MAP.items()}
+
+    # Boot-once reboot listener (SUSHY_EMULATOR_BOOT_ONCE).
+    _boot_once_monitor = None
 
     INTERFACE_MAP = {
         constants.DEVICE_TYPE_PXE: 'network',
@@ -198,8 +202,49 @@ class LibvirtDriver(AbstractSystemsDriver):
             'SUSHY_EMULATOR_STORAGE_POOL', cls.STORAGE_POOL)
         cls.SUSHY_EMULATOR_IDENTITY_AS_NAME = cls._config.get(
             'SUSHY_EMULATOR_IDENTITY_AS_NAME', False)
+        cls.SUSHY_EMULATOR_BOOT_ONCE = cls._config.get(
+            'SUSHY_EMULATOR_BOOT_ONCE', False)
         cls._http_boot_uri = None
+
+        # Start the boot-once reboot listener once, if enabled.
+        if cls.SUSHY_EMULATOR_BOOT_ONCE and cls._boot_once_monitor is None:
+            cls._boot_once_monitor = boot_once.BootOnceMonitor(cls(), logger)
+            cls._boot_once_monitor.start()
+
         return cls
+
+    def mark_boot_once(self, identity):
+        """Arm a one-time boot if the boot-once listener is enabled."""
+        monitor = type(self)._boot_once_monitor
+        if monitor is not None:
+            monitor.mark(identity)
+
+    def clear_boot_once(self, identity):
+        """Disarm any pending one-time boot if the listener is enabled."""
+        monitor = type(self)._boot_once_monitor
+        if monitor is not None:
+            monitor.clear(identity)
+
+    def _get_on_reboot(self, identity):
+        """Return the domain's <on_reboot> action (default 'restart')."""
+        domain = self._get_domain(identity, readonly=True)
+        # Read-only connection forbids the secure flag; on_reboot isn't
+        # sensitive, so dump without it.
+        tree = ET.fromstring(self.get_xml_desc(domain, dump_sensitive=False))
+        element = tree.find('on_reboot')
+        if element is not None and element.text:
+            return element.text
+        return 'restart'
+
+    def _set_on_reboot(self, identity, action):
+        """Set the domain's <on_reboot> action and redefine it."""
+        domain = self._get_domain(identity)
+        tree = ET.fromstring(self.get_xml_desc(domain))
+        element = tree.find('on_reboot')
+        if element is None:
+            element = ET.SubElement(tree, 'on_reboot')
+        element.text = action
+        self._defineDomain(tree)
 
     @memoize.memoize()
     def _get_domain(self, identity, readonly=False):
@@ -353,6 +398,11 @@ class LibvirtDriver(AbstractSystemsDriver):
                    '%(error)s' % {'uri': self._uri, 'error': e})
 
             raise error.FishyError(msg)
+
+        # Boot-once: revert persistent config to disk after power-on.
+        monitor = type(self)._boot_once_monitor
+        if monitor is not None and state in ('On', 'ForceOn', 'ForceRestart'):
+            monitor.revert_after_start(identity)
 
     def get_boot_device(self, identity):
         """Get computer system boot device name
